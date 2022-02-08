@@ -19,7 +19,7 @@ containerd:
   system: false
   user: false
 cpus: 4
-memory: 10GiB
+memory: 8GiB
 disk: 100GiB
 provision:
 - mode: system
