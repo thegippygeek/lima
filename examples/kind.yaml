@@ -1,0 +1,155 @@
+# Deploy kubernetes via kind (kubernetes-in-docker)
+# $ limactl start ./kind.yaml
+# $ limactl shell kind kubectl cluster-info
+# $ limactl shell kind docker container ps
+
+# This example requires Lima v0.8.0 or later
+images:
+# Hint: run `limactl prune` to invalidate the "current" cache
+- location: "https://cloud-images.ubuntu.com/impish/current/impish-server-cloudimg-amd64.img"
+  arch: "x86_64"
+- location: "https://cloud-images.ubuntu.com/impish/current/impish-server-cloudimg-arm64.img"
+  arch: "aarch64"
+mounts:
+- location: "~"
+- location: "/tmp/lima"
+  writable: true
+# containerd is managed by Docker, not by Lima, so the values are set to false here.
+containerd:
+  system: false
+  user: false
+cpus: 4
+memory: 10GiB
+disk: 100GiB
+provision:
+- mode: system
+  script: |
+    #!/bin/sh
+    sed -i 's/host.lima.internal.*/host.lima.internal host.docker.internal/' /etc/hosts
+- mode: system
+  script: |
+    #!/bin/bash
+    set -eux -o pipefail
+    command -v docker >/dev/null 2>&1 && exit 0
+    export DEBIAN_FRONTEND=noninteractive
+    curl -fsSL https://get.docker.com | sh
+# See https://docs.docker.com/engine/install/linux-postinstall/
+- mode: user
+  script: |
+    #!/bin/bash
+    set -eux -o pipefail
+    sudo usermod -aG docker $USER
+# See https://kind.sigs.k8s.io/docs/user/quick-start/#installation
+- mode: system
+  script: |
+    #!/bin/bash
+    set -eux -o pipefail
+    command -v kind >/dev/null 2>&1 && exit 0
+    kind_version=latest
+    case $(uname -m) in
+      x86_64)
+        curl -sSL -o kind https://kind.sigs.k8s.io/dl/${kind_version}/kind-linux-amd64
+        ;;
+      aarch64)
+        curl -sSL -o kind https://kind.sigs.k8s.io/dl/${kind_version}/kind-linux-arm64
+        ;;
+    esac
+    chmod +x ./kind
+    mv ./kind /usr/local/bin/kind
+    kind completion bash >/etc/bash_completion.d/kind
+# See https://kubernetes.io/docs/tasks/tools/#kubectl
+- mode: system
+  script: |
+    #!/bin/bash
+    set -eux -o pipefail
+    command -v kubectl >/dev/null 2>&1 && exit 0
+    kube_version=$(strings $(which kind) | grep -o 'kindest/node:v[0-9.]*' | sed -e 's,kindest/node:,,')
+    case $(uname -m) in
+      x86_64)
+        curl -sSL -o kubectl https://dl.k8s.io/release/${kube_version}/bin/linux/amd64/kubectl
+        ;;
+      aarch64)
+        curl -sSL -o kubectl https://dl.k8s.io/release/${kube_version}/bin/linux/arm64/kubectl
+        ;;
+    esac
+    install kubectl /usr/local/bin/kubectl
+    rm -f kubectl
+    kubectl completion bash >/etc/bash_completion.d/kubectl
+- mode: user
+  script: |
+    #!/bin/bash
+    set -eux -o pipefail
+    cat > kind-config.yaml <<EOL
+    kind: Cluster
+    apiVersion: kind.x-k8s.io/v1alpha4
+    name: kind
+    nodes:
+    - role: control-plane
+      # image: kindest/node:v1.21.2@sha256:0fda882e43d425622f045b492f8bd83c2e0b4984fc03e2e05ec101ca1a685fb7
+      # image: kindest/node:v1.21.1@sha256:69860bda5563ac81e3c0057d654b5253219618a22ec3a346306239bba8cfa1a6
+      # image: kindest/node:v1.20.7@sha256:cbeaf907fc78ac97ce7b625e4bf0de16e3ea725daf6b04f930bd14c67c671ff9
+    # - role: worker
+    # - role: worker
+    EOL
+- mode: user
+  script: |
+    #!/bin/bash
+    set -eux -o pipefail
+    docker container inspect -f '{{.Id}}' kind-control-plane && exit 0
+    kind create cluster --config=kind-config.yaml
+probes:
+- script: |
+    #!/bin/bash
+    set -eux -o pipefail
+    if ! timeout 30s bash -c "until command -v docker >/dev/null 2>&1; do sleep 3; done"; then
+      echo >&2 "docker is not installed yet"
+      exit 1
+    fi
+    if ! timeout 30s bash -c "until command -v kind >/dev/null 2>&1; do sleep 3; done"; then
+      echo >&2 "kind is not installed yet"
+      exit 1
+    fi
+    if ! timeout 30s bash -c "until command -v kubectl >/dev/null 2>&1; do sleep 3; done"; then
+      echo >&2 "kubectl is not installed yet"
+      exit 1
+    fi
+  hint: See "/var/log/cloud-init-output.log". in the guest
+portForwards:
+- guestSocket: /var/run/docker.sock
+  hostSocket: "{{.Dir}}/sock/docker.sock"
+#   guestPortRange:
+#     - 0
+#     - 0
+#   hostPortRange:
+#     - 0
+#     - 0
+#   proto: tcp
+# - guestIP: 127.0.0.1
+#   guestPortRange:
+#     - 1
+#     - 65535
+#   hostIP: 0.0.0.0
+#   hostPortRange:
+#     - 1
+#     - 65535
+#   proto: tcp
+message: |
+  ---
+  To run `kubectl` on the host (assumes kubectl is installed):
+  ---
+  mkdir -p "{{.Dir}}/conf"
+  export KUBECONFIG="{{.Dir}}/conf/kubeconfig.yaml"
+  limactl shell {{.Name}} cat '$HOME/.kube/config' >$KUBECONFIG
+  ... or  ...
+  kind export kubeconfig 
+  $ kubectl ...
+  ----
+  To run `docker` on the host (assumes docker-cli is installed), run the following commands:
+  ------
+  docker context create {{.Name}} --docker "host=unix://{{.Dir}}/sock/docker.sock"
+  docker context use {{.Name}}
+  docker run hello-world
+  ------
+  NOTE: if you can not connect to docker host, please restart 
+  limactl stop {{.Name}} 
+  limactl start {{.Name}}
