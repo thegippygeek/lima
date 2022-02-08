@@ -134,16 +134,7 @@ portForwards:
 #     - 65535
 #   proto: tcp
 message: |
-  ---
-  To run `kubectl` on the host (assumes kubectl is installed):
-  ---
-  mkdir -p "{{.Dir}}/conf"
-  export KUBECONFIG="{{.Dir}}/conf/kubeconfig.yaml"
-  limactl shell {{.Name}} cat '$HOME/.kube/config' >$KUBECONFIG
-  ... or  ...
-  kind export kubeconfig 
-  $ kubectl ...
-  ----
+  ------
   To run `docker` on the host (assumes docker-cli is installed), run the following commands:
   ------
   docker context create {{.Name}} --docker "host=unix://{{.Dir}}/sock/docker.sock"
@@ -153,3 +144,13 @@ message: |
   NOTE: if you can not connect to docker host, please restart 
   limactl stop {{.Name}} 
   limactl start {{.Name}}
+  -----
+  To run `kubectl` on the host (assumes kubectl is installed):
+  -----
+  mkdir -p "{{.Dir}}/conf"
+  export KUBECONFIG="{{.Dir}}/conf/kubeconfig.yaml"
+  limactl shell {{.Name}} cat '$HOME/.kube/config' >$KUBECONFIG
+  ... or  ...
+  kind export kubeconfig 
+  $ kubectl ...
+  
